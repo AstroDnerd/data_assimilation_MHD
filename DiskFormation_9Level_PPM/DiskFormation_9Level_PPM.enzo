@@ -77,7 +77,7 @@ RadiativeCooling            = 0        // cooling off
 #  set grid refinement parameters
 #
 StaticHierarchy           = 0          // dynamic hierarchy
-MaximumRefinementLevel    = 3         // use up to 7 levels
+MaximumRefinementLevel    = 9         // use up to 7 levels
 RefineBy                  = 2          // refinement factor
 CellFlaggingMethod        = 2 6        // use baryon mass and Truelove criterion for refinement 
 MinimumEfficiency         = 0.3
