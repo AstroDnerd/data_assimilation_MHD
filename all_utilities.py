@@ -13,6 +13,10 @@ from IPython.display import Image
 warnings.filterwarnings("ignore")
 import json
 
+from tempfile import mkstemp
+from shutil import move, copymode
+from os import fdopen, remove
+
 from mpl_toolkits.axes_grid1 import AxesGrid
 
 
@@ -31,14 +35,15 @@ def run_simulation(path_to_simulation_output, restart_datadump = None, path_to_i
     if path_to_initial_conditions is not None:
         #copy initial conditions to the simulation output directory and run the simulation there
         curr_dir = os.getcwd()
+        print(curr_dir)
         os.chdir(path_to_simulation_output)
         os.system("cp "+path_to_initial_conditions+" ./")
         start_time = time.time()
-        os.system("mpirun -np "+str(num_processors)+" ./enzo.exe "+path_to_initial_conditions+" |& tee output.txt")
+        os.system("mpirun -np "+str(num_processors)+" ./enzo.exe "+path_to_initial_conditions+" | tee output.txt >/dev/null 2>&1") #The last bit after output.txt is to suppress all debug output in the notebook
         end_time = time.time()
-        os.system("echo 'Simulation took "+str(end_time-start_time)+" seconds' |& tee -a output.txt")
+        os.system("echo 'Simulation took "+str(end_time-start_time)+" seconds' | tee -a output.txt")
         os.chdir(curr_dir)
-        print("Simulation completed. Time taken: "+str(end_time-start_time)+" seconds")
+        print("Simulation took "+str(end_time-start_time)+" seconds")
     else:
         if restart_datadump is None:
             print("provide either path to initial conditions or restart datadump")
@@ -47,11 +52,11 @@ def run_simulation(path_to_simulation_output, restart_datadump = None, path_to_i
         curr_dir = os.getcwd()
         os.chdir(path_to_simulation_output)
         start_time = time.time()
-        os.system("mpirun -np "+str(num_processors)+" ./enzo.exe -r "+restart_datadump+" |& tee output.txt")
+        os.system("mpirun -np "+str(num_processors)+" ./enzo.exe -r "+restart_datadump+" | tee output.txt >/dev/null 2>&1")
         end_time = time.time()
-        os.system("echo 'Simulation took "+str(end_time-start_time)+" seconds' |& tee -a output.txt")
+        os.system("echo 'Simulation took "+str(end_time-start_time)+" seconds' | tee -a output.txt")
         os.chdir(curr_dir)
-        print("Simulation completed. Time taken: "+str(end_time-start_time)+" seconds")
+        print("Simulation took "+str(end_time-start_time)+" seconds")
 
 def simulation_visualize(plot_dir, PlotType, path_to_data, coordinate, dataset_to_plot, number_of_frames,cbar_range = None, zoom_level = 1):
     #import data
@@ -103,6 +108,7 @@ def simulation_comparison(Path_to_sim_1, path_to_sim_2, observation_time, ALL_FR
     plt.close()
 
 def get_params(line_arr):
+    pointer = []
     for i in range(len(line_arr)):
         comp_str = line_arr[i].split()
         if comp_str[0] == 'Grid':
@@ -115,8 +121,9 @@ def get_params(line_arr):
             gridre = [float(comp_str[2]), float(comp_str[3]), float(comp_str[4])]
         if comp_str[0] == 'BaryonFileName':
             fname = comp_str[2]
-        #grab pointers if needed
-    return gridnum, {'GridDimension': griddim, 'GridLeftEdge': gridle, 'GridRightEdge': gridre, 'BaryonFileName': fname}
+        if comp_str[0] == 'Pointer:':
+            pointer.append(int(comp_str[-1]))
+    return gridnum, {'GridDimension': griddim, 'GridLeftEdge': gridle, 'GridRightEdge': gridre, 'BaryonFileName': fname, 'Pointers':pointer}
 def read_hierarchy_file(hr_filename):
     Grid_dict = {}
     running_line_arr = []
@@ -134,3 +141,30 @@ def read_hierarchy_file(hr_filename):
     gridnum, temp_dic = get_params(running_line_arr)
     Grid_dict[gridnum] = temp_dic
     return Grid_dict
+
+def edit_enzo_param_file(current_time, new_time, ANALYSIS_RUN_INITIAL_CONDITIONS, ANALYSIS_RUN, ALL_FRAMES):
+    if current_time == 0:
+        fpath = ANALYSIS_RUN_INITIAL_CONDITIONS
+    else:
+        frame_num = str(np.where(ALL_FRAMES==current_time)[0][0]).zfill(4)
+        fpath = ANALYSIS_RUN +"/Data/DD"+frame_num+"/DD"+frame_num
+    #Find StopTime and set it to new time
+    #Create temp file
+    fh, abs_path = mkstemp()
+    with fdopen(fh,'w') as new_param_file:
+        with open(fpath) as old_param_file:
+            for line in old_param_file:
+                line_arr = line.split()
+                if len(line_arr)>0:
+                    if line_arr[0] == 'StopTime':
+                        new_param_file.write('StopTime = '+str(new_time)+' \n')
+                        print('Time changed')
+                    else:
+                        new_param_file.write(line)
+    #Copy the file permissions from the old file to the new file
+    copymode(fpath, abs_path)
+    #Remove original file
+    remove(fpath)
+    #Move new file
+    move(abs_path, fpath)
+    print('Parameter File updated')
